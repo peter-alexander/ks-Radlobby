@@ -2,6 +2,9 @@ name: Build and publish Radlobby datasets
 
 on:
   workflow_dispatch:
+  schedule:
+    - cron: '0 0 * * *'
+      timezone: 'Europe/Vienna'
 
 permissions:
   contents: read
