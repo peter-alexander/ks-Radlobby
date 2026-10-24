@@ -44,9 +44,11 @@ jobs:
         if: steps.tippecanoe-cache.outputs.cache-hit != 'true'
         run: bash .github/scripts/build-tippecanoe.sh
 
+      - name: Add tippecanoe to PATH
+        run: echo "${GITHUB_WORKSPACE}/.local/bin" >> "$GITHUB_PATH"
+
       - name: Build datasets using original scripts
         env:
-          PATH: ${{ github.workspace }}/.local/bin:${{ env.PATH }}
           TIPPECANOE_BIN: ${{ github.workspace }}/.local/bin/tippecanoe
           BUILD_LEGACY: 'true'
           BUILD_PMTILES: 'true'
