@@ -1,0 +1,107 @@
+name: Build and publish Radlobby datasets
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: radlobby-pages
+  cancel-in-progress: false
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: '.nvmrc'
+          cache: npm
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential libsqlite3-dev zlib1g-dev php-cli php-curl php-mbstring php-xml
+          npm ci --no-fund --no-audit
+
+      - name: Cache tippecanoe
+        id: tippecanoe-cache
+        uses: actions/cache@v6
+        with:
+          path: .local/bin
+          key: ${{ runner.os }}-tippecanoe-radlobby-v1
+
+      - name: Build tippecanoe
+        if: steps.tippecanoe-cache.outputs.cache-hit != 'true'
+        run: bash .github/scripts/build-tippecanoe.sh
+
+      - name: Build datasets using original scripts
+        env:
+          PATH: ${{ github.workspace }}/.local/bin:${{ env.PATH }}
+          TIPPECANOE_BIN: ${{ github.workspace }}/.local/bin/tippecanoe
+          BUILD_LEGACY: 'true'
+          BUILD_PMTILES: 'true'
+          BUILD_PBF_TILES: 'false'
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          node rge-analyse/build.mjs
+          bash radparken/run.sh
+          bash sitzmoeglichkeiten/run.sh
+          bash radlkarte/run.sh
+          node kuka/build.mjs
+          php radnetz-dashboard/test.php
+          php radnetz-dashboard/build.php
+
+      - name: Assemble publication and asset versions
+        run: |
+          python3 - <<'PY'
+          import json
+          import pathlib
+          import shutil
+          import time
+
+          public = pathlib.Path("pages")
+          public.mkdir(exist_ok=True)
+          output = {
+              "rge_analyse.pmtiles": pathlib.Path("rge-analyse/build/rge_analyse.pmtiles"),
+              "radparken.pmtiles": pathlib.Path("radparken/build/radparken.pmtiles"),
+              "sitzmoeglichkeiten.pmtiles": pathlib.Path("sitzmoeglichkeiten/out/sitzmoeglichkeiten.pmtiles"),
+              "radlkarte.pmtiles": pathlib.Path("radlkarte/build/Radlkarte/radlkarte.pmtiles"),
+              "Kuka_Entries.json": pathlib.Path("kuka/build/Kuka_Entries.json"),
+              "RadnetzDashboard.geojson": pathlib.Path("radnetz-dashboard/build/RadnetzDashboard.geojson"),
+          }
+          stamp = str(int(time.time()))
+          for name, path in output.items():
+              if not path.is_file() or path.stat().st_size == 0:
+                  raise SystemExit(f"Required build output missing or empty: {path}")
+              shutil.copy2(path, public / name)
+              print(name, path.stat().st_size)
+          if sum(path.stat().st_size for path in public.iterdir()) > 1_000_000_000:
+              raise SystemExit("GitHub Pages 1 GB recommended site limit exceeded")
+          manifest = {
+              "schema": 1,
+              "files": {name: stamp for name in output},
+          }
+          (public / "asset-versions.json").write_text(
+              json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
+          )
+          PY
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: pages/
+
+      - name: Publish Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
