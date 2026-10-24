@@ -3,4 +3,4 @@
 - Sitzmöglichkeiten
 - Radlkarte
 - Kuka-Entries
-- RadnetzDashboard
+- Radnetz-Dashboard
